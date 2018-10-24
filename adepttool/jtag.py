@@ -20,7 +20,7 @@ class Chain:
                     self.devices.append(cls(self, res, nam))
                     break
             else:
-                raise UnknownDeviceError(f'unknown IDCODE {res:08x}')
+                raise UnknownDeviceError('unknown IDCODE {res:08x}'.format(res=res))
         self.port.put_tms_tdi_bits(False, 2, bytes([0xa]))
 
     def shift_num(self, num, length, last):
