@@ -128,6 +128,20 @@ class JtagDev:
     def shift_dr_bytes(self, data, length):
         self.chain.shift_dr_one_bytes(self, data, length)
 
+    def get_status(self):
+        irs = [
+            (1 << dev.IR_LEN) - 1
+            for dev in self.chain.devices
+        ]
+        res = self.chain.shift_ir(irs)
+        for i, dev in enumerate(self.chain.devices):
+            if self.chain.devices[i] is self:
+                return res[i]
+
+
+class Spartan3(JtagDev):
+    IR_LEN = 6
+
     def jprogram(self):
         self.prep_cmd(0x0b)
 
@@ -143,20 +157,6 @@ class JtagDev:
         while not (self.get_status() & 0x20):
             pass
         self.chain.clock_rti(12)
-
-    def get_status(self):
-        irs = [
-            (1 << dev.IR_LEN) - 1
-            for dev in self.chain.devices
-        ]
-        res = self.chain.shift_ir(irs)
-        for i, dev in enumerate(self.chain.devices):
-            if self.chain.devices[i] is self:
-                return res[i]
-
-
-class Spartan3(JtagDev):
-    IR_LEN = 6
 
 
 class PlatformFlashSerial(JtagDev):
