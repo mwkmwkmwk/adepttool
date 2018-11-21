@@ -45,6 +45,10 @@ CMD_DJTG_PUT_TMS_BITS = 11
 DJTG_CAPS_SET_SPEED = 0x00000001
 
 CMD_DEPP_SET_TIMEOUT = 3
+CMD_DEPP_PUT_REG = 4
+CMD_DEPP_GET_REG = 5
+CMD_DEPP_PUT_REGSET = 6
+CMD_DEPP_GET_REGSET = 7
 
 
 class DeviceInterfaceError(Exception):
@@ -58,6 +62,12 @@ class PortInUseError(CommandError):
     pass
 
 class PortDisabledError(CommandError):
+    pass
+
+class EppAddrTimeoutError(CommandError):
+    pass
+
+class EppDataTimeoutError(CommandError):
     pass
 
 class UnknownAppError(CommandError):
@@ -161,6 +171,10 @@ class Device:
                 raise PortInUseError
             if status == 4 and len(reply) == 2:
                 raise PortDisabledError
+            if status == 5 and len(reply) == 2:
+                raise EppAddrTimeoutError
+            if status == 6 and len(reply) == 2:
+                raise EppDataTimeoutError
             if status == 49 and len(reply) == 2:
                 raise UnknownAppError
             if status == 50 and len(reply) == 2:
@@ -360,3 +374,12 @@ class Depp(App):
     def set_timeout(self, timeout):
         res = self.cmd(CMD_DEPP_SET_TIMEOUT, timeout.to_bytes(4, 'little'), 4)
         return int.from_bytes(res, 'little')
+
+    def put_reg(self, addr, data):
+        req = bytes([addr]) + len(data).to_bytes(4, 'little')
+        _, sent, recvd, res = self.cmd_long(CMD_DEPP_PUT_REG_SET, req, data, 0)
+
+    def get_reg(self, addr, num):
+        req = bytes([addr]) + num.to_bytes(4, 'little')
+        _, sent, recvd, res = self.cmd_long(CMD_DEPP_GET_REG_SET, req, b'', num)
+        return res
