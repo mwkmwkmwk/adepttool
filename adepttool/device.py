@@ -47,8 +47,8 @@ DJTG_CAPS_SET_SPEED = 0x00000001
 CMD_DEPP_SET_TIMEOUT = 3
 CMD_DEPP_PUT_REG = 4
 CMD_DEPP_GET_REG = 5
-CMD_DEPP_PUT_REGSET = 6
-CMD_DEPP_GET_REGSET = 7
+CMD_DEPP_PUT_REG_SET = 6
+CMD_DEPP_GET_REG_SET = 7
 
 
 class DeviceInterfaceError(Exception):
@@ -160,9 +160,12 @@ class Device:
     def cmd(self, app, cmd, port, payload=b'', reply_len=0, get_stats=False):
         data = bytes([len(payload) + 3, app, cmd, port]) + payload
         self.dev.bulkWrite(0x01, data)
-        reply = bytes(self.dev.bulkRead(0x82, reply_len + 10))
+        while True:
+            reply = bytes(self.dev.bulkRead(0x82, reply_len + 10))
+            if reply:
+                break
         if len(reply) < 2:
-            raise DeviceInterfaceError
+            raise DeviceInterfaceError(reply)
         if reply[0] != len(reply) - 1:
             raise DeviceInterfaceError
         status = reply[1] & 0x3f
@@ -173,8 +176,8 @@ class Device:
                 raise PortDisabledError
             if status == 5 and len(reply) == 2:
                 raise EppAddrTimeoutError
-            if status == 6 and len(reply) == 2:
-                raise EppDataTimeoutError
+            if status == 6 and len(reply) == 6:
+                raise EppDataTimeoutError(int.from_bytes(reply[2:6], 'little'))
             if status == 49 and len(reply) == 2:
                 raise UnknownAppError
             if status == 50 and len(reply) == 2:
@@ -210,20 +213,21 @@ class Device:
 
     def cmd_long(self, app, cmd, port, payload, data_send, data_recv_len):
         self.cmd(app, cmd, port, payload, 0)
+        bad = False
         def finish_send(xfer):
-            nonlocal send_done
+            nonlocal send_done, bad
             if xfer.getStatus() != usb1.TRANSFER_COMPLETED:
-                raise DeviceInterfaceError
+                bad = xfer
             send_done = True
             if len(data_send) != xfer.getActualLength():
-                raise DeviceInterfaceError
+                bad = xfer
         def finish_recv(xfer):
-            nonlocal recv_done, data_recv
+            nonlocal recv_done, data_recv, bad
             if xfer.getStatus() != usb1.TRANSFER_COMPLETED:
-                raise DeviceInterfaceError
+                bad = xfer
             recv_done = True
             if data_recv_len != xfer.getActualLength():
-                raise DeviceInterfaceError
+                bad = xfer
             data_recv = xfer.getBuffer()[:]
         if data_send:
             xfer_send = self.dev.getTransfer()
@@ -240,9 +244,11 @@ class Device:
         else:
             recv_done = True
             data_recv = b''
-        while not recv_done or not send_done:
+        while (not recv_done or not send_done) and not bad:
             self.ctx.handleEvents()
         reply, sent, recvd = self.cmd(app, cmd | 0x80, port, b'', 0, True)
+        if bad:
+            raise DeviceInterfaceError(bad)
         return reply, sent, recvd, data_recv
 
 
@@ -377,9 +383,21 @@ class Depp(App):
 
     def put_reg(self, addr, data):
         req = bytes([addr]) + len(data).to_bytes(4, 'little')
-        _, sent, recvd, res = self.cmd_long(CMD_DEPP_PUT_REG_SET, req, data, 0)
+        _, sent, recvd, res = self.cmd_long(CMD_DEPP_PUT_REG, req, data, 0)
 
     def get_reg(self, addr, num):
         req = bytes([addr]) + num.to_bytes(4, 'little')
-        _, sent, recvd, res = self.cmd_long(CMD_DEPP_GET_REG_SET, req, b'', num)
+        _, sent, recvd, res = self.cmd_long(CMD_DEPP_GET_REG, req, b'', num)
         return res
+
+    def get_regs(self, addrs):
+        req = len(addrs).to_bytes(4, 'little')
+        _, sent, recvd, res = self.cmd_long(CMD_DEPP_GET_REG_SET, req, addrs, len(addrs))
+        return res
+
+    def put_regs(self, addrs, data):
+        if len(addrs) != len(data):
+            raise ValueError('mismatched address and data lengths')
+        req = len(addrs).to_bytes(4, 'little')
+        payload = b''.join(bytes([a, d]) for a, d in zip(addrs, data))
+        _, sent, recvd, res = self.cmd_long(CMD_DEPP_PUT_REG_SET, req, payload, 0)
