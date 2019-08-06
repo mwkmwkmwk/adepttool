@@ -1,3 +1,9 @@
+
+byterev = bytes(
+    sum(1 << bit for bit in range(8) if x & 1 << (7 - bit))
+    for x in range(0x100)
+)
+
 class UnknownDeviceError(Exception):
     pass
 
@@ -63,22 +69,17 @@ class Chain:
                 finbyte = res[-1] | hi << ((length - 1) % 8)
                 return res[:-1] + bytes([finbyte])
 
-    def shift_ir(self, irs):
-        if len(irs) != len(self.devices):
-            raise ValueError
+    def shift_ir(self):
+        irs = [
+            dev.cur_cmd
+            for dev in self.devices
+        ]
         self.port.put_tms_tdi_bits(False, 4, bytes([0xa]))
         res = []
         for dev, ir in zip(self.devices, irs):
             res.append(self.shift_num(ir, dev.IR_LEN, dev is self.devices[-1]))
         self.port.put_tms_tdi_bits(False, 1, bytes([0x2]))
         return res
-
-    def prep_cmd(self, cdev, cmd):
-        irs = [
-            cmd if dev is cdev else (1 << dev.IR_LEN) - 1
-            for dev in self.devices
-        ]
-        self.shift_ir(irs)
 
     def shift_dr_one_num(self, cdev, num, length):
         self.port.put_tms_tdi_bits(False, 3, bytes([0x2]))
@@ -118,9 +119,11 @@ class JtagDev:
         self.chain = chain
         self.idcode = idcode
         self.name = name
+        self.cur_cmd = (1 << self.IR_LEN) - 1
 
     def prep_cmd(self, cmd):
-        self.chain.prep_cmd(self, cmd)
+        self.cur_cmd = cmd
+        self.chain.shift_ir()
 
     def shift_dr_num(self, num, length):
         self.chain.shift_dr_one_num(self, num, length)
@@ -129,11 +132,7 @@ class JtagDev:
         self.chain.shift_dr_one_bytes(self, data, length)
 
     def get_status(self):
-        irs = [
-            (1 << dev.IR_LEN) - 1
-            for dev in self.chain.devices
-        ]
-        res = self.chain.shift_ir(irs)
+        res = self.chain.shift_ir()
         for i, dev in enumerate(self.chain.devices):
             if self.chain.devices[i] is self:
                 return res[i]
@@ -147,15 +146,24 @@ class Spartan3(JtagDev):
 
     def cfg_in(self, data):
         self.prep_cmd(0x05)
-        self.shift_dr_bytes(data, len(data) * 8)
+        if data:
+            self.shift_dr_bytes(bytes(byterev[x] for x in data), len(data) * 8)
 
     def jstart(self):
         self.prep_cmd(0x0c)
         self.chain.clock_rti(12)
 
+    def jshutdown(self):
+        self.prep_cmd(0x0d)
+        self.chain.clock_rti(12)
+
+    def wait_for_init(self):
+        while not (self.get_status() & 0x10):
+            pass
+
     def wait_for_done(self):
         while not (self.get_status() & 0x20):
-            pass
+            self.chain.clock_rti(12)
         self.chain.clock_rti(12)
 
 

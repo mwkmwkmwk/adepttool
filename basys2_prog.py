@@ -15,12 +15,6 @@ args = parser.parse_args()
 with open(args.bitfile, 'rb') as f:
     data = f.read()
 
-xlat = bytes(
-    sum(1 << bit for bit in range(8) if x & 1 << (7 - bit))
-    for x in range(0x100)
-)
-data = bytes(xlat[x] for x in data)
-
 with usb1.USBContext() as ctx:
     devs = get_devices(ctx)
     if args.device >= len(devs):
@@ -57,6 +51,10 @@ with usb1.USBContext() as ctx:
 
     print('JPROGRAM')
     fpga.jprogram()
+    print_status()
+    fpga.cfg_in(b'')
+    print('Wait for INIT')
+    fpga.wait_for_init()
     print_status()
     print('CFG_IN')
     fpga.cfg_in(data)
