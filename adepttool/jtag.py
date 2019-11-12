@@ -1,8 +1,14 @@
 
-byterev = bytes(
+byterev_xlat = bytes(
     sum(1 << bit for bit in range(8) if x & 1 << (7 - bit))
     for x in range(0x100)
 )
+
+def wordrev(word):
+    return sum(1 << (31 - i) for i in range(32) if word & 1 << i)
+
+def byterev(data):
+    return bytes(byterev_xlat[x] for x in data)
 
 class UnknownDeviceError(Exception):
     pass
@@ -126,10 +132,10 @@ class JtagDev:
         self.chain.shift_ir()
 
     def shift_dr_num(self, num, length):
-        self.chain.shift_dr_one_num(self, num, length)
+        return self.chain.shift_dr_one_num(self, num, length)
 
     def shift_dr_bytes(self, data, length):
-        self.chain.shift_dr_one_bytes(self, data, length)
+        return self.chain.shift_dr_one_bytes(self, data, length)
 
     def get_status(self):
         res = self.chain.shift_ir()
@@ -147,15 +153,45 @@ class Spartan3(JtagDev):
     def cfg_in(self, data):
         self.prep_cmd(0x05)
         if data:
-            self.shift_dr_bytes(bytes(byterev[x] for x in data), len(data) * 8)
+            self.shift_dr_bytes(byterev(data), len(data) * 8)
 
-    def jstart(self):
+    def jstart(self, num_rti=12):
         self.prep_cmd(0x0c)
-        self.chain.clock_rti(12)
+        self.chain.clock_rti(num_rti)
 
-    def jshutdown(self):
+    def jshutdown(self, num_rti=12):
         self.prep_cmd(0x0d)
-        self.chain.clock_rti(12)
+        self.chain.clock_rti(num_rti)
+
+    def isc_enable(self, num_rti=12):
+        self.prep_cmd(0x10)
+        self.chain.clock_rti(num_rti)
+        return self.shift_dr_num(0, 5)
+
+    def isc_noop(self):
+        self.prep_cmd(0x14)
+        return self.shift_dr_num(0, 5)
+
+    def isc_program(self, word):
+        if self.cur_cmd != 0x11:
+            self.prep_cmd(0x11)
+        res = self.shift_dr_num(wordrev(word), 32)
+        self.chain.clock_rti(1)
+
+    def isc_read(self):
+        if self.cur_cmd != 0x15:
+            self.prep_cmd(0x15)
+        self.chain.clock_rti(1)
+        n = self.shift_dr_num(0, 69)
+        stat = n & 0x1f
+        lo = n >> 5 & 0xffffffff
+        hi = n >> 37
+        return hi, lo, stat
+
+    def isc_disable(self, num_rti=12):
+        self.prep_cmd(0x16)
+        self.chain.clock_rti(num_rti)
+        return self.shift_dr_num(0, 5)
 
     def wait_for_init(self):
         while not (self.get_status() & 0x10):

@@ -3,6 +3,7 @@ import usb1
 CTRL_GET_PRODUCT_NAME = 0xe1
 CTRL_GET_USER_NAME = 0xe2
 CTRL_GET_SERIAL_NUMBER = 0xe4
+CTRL_SET_SERIAL_NUMBER = 0xe5
 CTRL_GET_FW_VERSION = 0xe6
 CTRL_GET_CAPS = 0xe7
 CTRL_GET_PRODUCT_ID = 0xe9
@@ -115,6 +116,9 @@ class Device:
         if len(res) != 12:
             raise DeviceInterfaceError
         return res
+
+    def set_serial_number(self, sn):
+        self.dev.controlWrite(0x40, CTRL_SET_SERIAL_NUMBER, 0, 0, sn)
 
     def get_fw_version(self):
         res = bytes(self.dev.controlRead(0xc0, CTRL_GET_FW_VERSION, 0, 0, 2))
